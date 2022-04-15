@@ -4,11 +4,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import datetime
 import os
-from scipy.stats import chi2_contingency, chi2, ttest_ind_from_stats, norm, binom
+from scipy.stats import chi2_contingency, chi2, ttest_ind_from_stats, norm, binom, mannwhitneyu, t
 import statsmodels.formula.api as smf
 from statsmodels.stats.proportion import proportion_confint 
-from scipy.stats import mannwhitneyu, t
-from pyspark.sql.types import StringType
 import pyspark.sql.functions as f
 
 
@@ -401,21 +399,6 @@ def get_results(data, metric_field, confidence=0.9, threshold=None, calculate_ra
     )
     
 def improv_interval_binomial(confidence, successes_base, successes_var, obs_base, obs_var):
-    '''
-    Computes assymptotic confidence interval for ratio of means of binomial distributions. Uses confidence_interval_ratio,
-    ----
-    Input
-    ----
-    confidence - confidence level for interval, 0 < x < 1
-    successes_base - number of successes in base
-    successes_var - number of successes in variant
-    obs_base - number of observations in base
-    obs_variant - number of observations in variant
-    ----
-    Output
-    ----
-    impact, lower bound, upper bound
-    '''
     if (not obs_base
         or not obs_var
         or (successes_base > obs_base)
@@ -432,26 +415,6 @@ def improv_interval_binomial(confidence, successes_base, successes_var, obs_base
 
     
 def confidence_interval_ratio(avg_base, stdev_base, obs_base, avg_var, stdev_var, obs_var, alpha=DEFAULT_ALPHA):
-    '''
-    This should be used only to ensure parity with the current ET implementation. Down the line, better intervals should be used.
-
-    Adapted from et_math.py: https://gitlab.booking.com/datascience/pydat/blob/stats/booking/stats/et_math.py#L80
-    Computes asymptotic confidence interval for ratio of means. Uses sample average, instead of sample mean average as in Math.pm
-    ----
-    Input
-    ----
-    avg_base - sample mean in base
-    stdev_base - sample standard deviation in base
-    obs_base - number of observations in base
-    avg_var - sample mean variant
-    stdev_var - standard deviation in variant
-    obs_variant - number of observations in variant
-    alpha - false positive rate, 0 < x < 1
-    ----
-    Output
-    ----
-    impact, lower bound, upper bound
-    '''
     if (not avg_base or
             avg_var is None or np.isnan(avg_var)):
         return None, None, None
@@ -463,7 +426,7 @@ def confidence_interval_ratio(avg_base, stdev_base, obs_base, avg_var, stdev_var
         not obs_base or not obs_var):
         return estimate, None, None
 
-    zscore = scipy.stats.norm.ppf(1 - alpha/2)
+    zscore = norm.ppf(1 - alpha/2)
     A = avg_base*avg_var
     B = avg_base**2 - (zscore**2 * stdev_base**2/obs_base)
     C = avg_var**2 - (zscore**2 * stdev_var**2/obs_var)
