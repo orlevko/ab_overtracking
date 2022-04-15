@@ -15,8 +15,6 @@ import pyspark.sql.functions as f
 import patsy
 import plotly.graph_objects as go
 
-from booking.stats.et_math import improv_interval_binomial, confidence_interval_ratio 
-
 
 def vertical_plot_lines(x, xal, yal, **kwargs):
     plt.axvline(x.mean(), linestyle = '--', color = kwargs.get("color", "g"), alpha = 0.5)
@@ -402,18 +400,83 @@ def get_results(data, metric_field, confidence=0.9, threshold=None, calculate_ra
         ratio = calculate_ratio
     )
     
-@f.udf(StringType())
-def uvi_to_device_id(uvi):
-    if uvi is None:
-        return None
-    # Android
-    if len(uvi) == 38 :
-        norm_id = uvi[2:2+8]+uvi[11:11+4]+uvi[16:16+4]+uvi[21:21+4]+uvi[26:]
-        return norm_id[0:8] + '-' + norm_id[8:12] + '-' + norm_id[12:16] + '-' + norm_id[16:20] + '-' + norm_id[20:]
-        # Don't really know why, but below format wasn't working for Firefly experiment V2, but above works...
-        # return norm_id[0:7] + '-' + norm_id[8:11] + '-' + norm_id[12:15] + '-' + norm_id[16:19] + '-' + norm_id[20:]
-    # iOS
-    else:
-        norm_id = uvi[2:]
-        return norm_id[0:8] + '-' + norm_id[8:12] + '-' + norm_id[12:16] + '-' + norm_id[16:20] + '-' + norm_id[20:]    
+def improv_interval_binomial(confidence, successes_base, successes_var, obs_base, obs_var):
+    '''
+    Computes assymptotic confidence interval for ratio of means of binomial distributions. Uses confidence_interval_ratio,
+    ----
+    Input
+    ----
+    confidence - confidence level for interval, 0 < x < 1
+    successes_base - number of successes in base
+    successes_var - number of successes in variant
+    obs_base - number of observations in base
+    obs_variant - number of observations in variant
+    ----
+    Output
+    ----
+    impact, lower bound, upper bound
+    '''
+    if (not obs_base
+        or not obs_var
+        or (successes_base > obs_base)
+        or (successes_var > obs_var) ):
+        return np.nan, np.nan, np.nan
+
+    avg_base = successes_base/obs_base
+    avg_var = successes_var/obs_var
+    stdev_base = np.sqrt((avg_base-avg_base**2))
+    stdev_var = np.sqrt((avg_var-avg_var**2))
+
+    return confidence_interval_ratio(confidence, avg_base, avg_var,
+                                     stdev_base, stdev_var, obs_base, obs_var)
+
+    
+def confidence_interval_ratio(avg_base, stdev_base, obs_base, avg_var, stdev_var, obs_var, alpha=DEFAULT_ALPHA):
+    '''
+    This should be used only to ensure parity with the current ET implementation. Down the line, better intervals should be used.
+
+    Adapted from et_math.py: https://gitlab.booking.com/datascience/pydat/blob/stats/booking/stats/et_math.py#L80
+    Computes asymptotic confidence interval for ratio of means. Uses sample average, instead of sample mean average as in Math.pm
+    ----
+    Input
+    ----
+    avg_base - sample mean in base
+    stdev_base - sample standard deviation in base
+    obs_base - number of observations in base
+    avg_var - sample mean variant
+    stdev_var - standard deviation in variant
+    obs_variant - number of observations in variant
+    alpha - false positive rate, 0 < x < 1
+    ----
+    Output
+    ----
+    impact, lower bound, upper bound
+    '''
+    if (not avg_base or
+            avg_var is None or np.isnan(avg_var)):
+        return None, None, None
+
+    estimate = (avg_var - avg_base) / abs(avg_base)
+
+    if (stdev_base is None or stdev_var is None or 
+        np.isnan(stdev_base) or np.isnan(stdev_var) or
+        not obs_base or not obs_var):
+        return estimate, None, None
+
+    zscore = scipy.stats.norm.ppf(1 - alpha/2)
+    A = avg_base*avg_var
+    B = avg_base**2 - (zscore**2 * stdev_base**2/obs_base)
+    C = avg_var**2 - (zscore**2 * stdev_var**2/obs_var)
+    sqrt = A**2 - (B*C)
+
+    if (sqrt <= 0 or B <= 0):
+        return estimate, np.nan, np.nan
+
+    range = np.sqrt(sqrt)/B
+    fieller = [A/B - range - 1, A/B + range - 1]
+
+    if (avg_base < 0):
+        fieller = [-x for x in fieller]
+    return estimate, fieller[0], fieller[1]
+   
         
